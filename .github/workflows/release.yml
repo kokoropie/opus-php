@@ -1,0 +1,92 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Automatically trigger when you push a tag like 'v1.0.0'
+  workflow_dispatch: # Allow you to trigger the workflow manually from the Actions tab
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: libopusphp.so
+            asset_name: opusphp-linux.so
+          - os: macos-latest
+            artifact_name: libopusphp.dylib
+            asset_name: opusphp-macos.dylib
+          - os: windows-latest
+            # Cargo on Windows outputs .dll files but naming might lack 'lib' prefix
+            artifact_name: '*opus*.dll'
+            asset_name: opusphp-windows.dll
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3' # Change this if you want to build against a specific PHP version
+
+      - name: Install Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopus-dev clang pkg-config
+
+      - name: Install Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install opus
+
+      - name: Install Dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install opus:x64-windows
+          vcpkg integrate install
+
+      - name: Build Extension
+        run: cargo build --release
+        env:
+          # Helps Rust's build scripts find the vcpkg installation on Windows runners
+          VCPKG_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT }}
+
+      - name: Prepare Artifact
+        shell: bash
+        run: |
+          mkdir dist
+          # Find the compiled binary in target/release and rename it uniformly
+          find target/release -maxdepth 1 -name "${{ matrix.artifact_name }}" -exec cp {} dist/${{ matrix.asset_name }} \;
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required for creating a GitHub release
+    steps:
+      - name: Download all compiled artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
