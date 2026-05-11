@@ -4,47 +4,82 @@ Opus bindings for PHP.
 
 ## Requirements
 
-- Rust.
-- PHP 8.0.
-- Linux or Darwin based operating system.
-- [ext-php-rs](https://github.com/davidcole1340/ext-php-rs#requirements) requirements.
-- [libopus 1.3.1 or later](https://opus-codec.org/downloads/).
+- PHP 8.1 or later.
+- Linux, macOS, or Windows.
+- [libopus 1.3.1 or later](https://opus-codec.org/downloads/) — required at runtime on Linux and macOS.
 
 ## Installation
 
-```sh
-$ git clone git@github.com:davidcole1340/opus-php.git
+### Pre-built binaries (recommended)
+
+Download the extension for your platform and PHP version from the [Releases](../../releases) page.
+
+| Platform | File |
+|---|---|
+| Linux | `libopusphp-linux-phpX.Y.so` |
+| macOS | `libopusphp-macos-phpX.Y.dylib` |
+| Windows | `libopusphp-windows-phpX.Y.dll` |
+
+Then add the extension to your `php.ini`:
+
+```ini
+; Linux
+extension=/path/to/libopusphp-linux-php8.2.so
+
+; macOS
+extension=/path/to/libopusphp-macos-php8.2.dylib
+
+; Windows
+extension=C:\path\to\libopusphp-windows-php8.2.dll
+```
+
+> **Linux/macOS:** `libopus` must be installed on the system at runtime.
+> ```bash
+> # Debian/Ubuntu
+> sudo apt-get install libopus0
+>
+> # macOS
+> brew install opus
+> ```
+
+### Build from source
+
+**Prerequisites:**
+
+- [Rust](https://rustup.rs/) (stable on Linux/macOS, nightly on Windows)
+- Clang 5.0 or later
+- libopus development headers
+  ```bash
+  # Debian/Ubuntu
+  sudo apt-get install libopus-dev libclang-dev
+
+  # macOS
+  brew install opus
+
+  # Windows — install via vcpkg
+  vcpkg install opus:x64-windows
+  ```
+
+**Build:**
+
+```bash
+$ git clone https://github.com/kokoropie/opus-php.git
 $ cd opus-php
 $ cargo build --release
 ```
 
-This will produce a PHP extension file at `target/release/libopusphp.{so|dylib}`.
-You can then install this like any other PHP extension by adding it to your `php.ini` file.
+The compiled extension will be at:
+
+- `target/release/libopus_php.so` (Linux)
+- `target/release/libopus_php.dylib` (macOS)
+- `target/release/opus_php.dll` (Windows)
+
+## Releases
+
+Pre-built binaries for Linux, macOS, and Windows are automatically built and published via GitHub Actions whenever a new version tag (`v*.*.*`) is pushed. Each release includes binaries for PHP 8.1 through 8.4.
 
 ## License
 
-The contents of this repository are licensed under the MIT license:
-
-```
-MIT License
+Licensed under the [MIT License](LICENSE).
 
 Copyright (c) 2021 David Cole
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
