@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        php: ["8.0", "8.1", "8.2", "8.3"]
+        php: ["8.1", "8.2", "8.3", "8.4"]
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +32,17 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           tools: none
+
+      # ext-php-rs build.rs looks for `php-config` via the PHP_CONFIG env var.
+      # setup-php installs a versioned binary (php-config8.2 etc), so we resolve
+      # the real path here and export it.
+      - name: Expose php-config path
+        run: |
+          PHP_CONFIG_BIN=$(which php-config${{ matrix.php }} 2>/dev/null \
+            || which php-config$(echo "${{ matrix.php }}" | cut -d. -f1) 2>/dev/null \
+            || which php-config 2>/dev/null)
+          echo "Found php-config at: $PHP_CONFIG_BIN"
+          echo "PHP_CONFIG=$PHP_CONFIG_BIN" >> "$GITHUB_ENV"
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -48,8 +59,6 @@ jobs:
 
       - name: Build
         run: cargo build --release
-        env:
-          PHP_CONFIG: php-config
 
       - name: Rename artifact
         run: |
@@ -69,7 +78,7 @@ jobs:
     runs-on: macos-latest
     strategy:
       matrix:
-        php: ["8.0", "8.1", "8.2", "8.3"]
+        php: ["8.1", "8.2", "8.3", "8.4"]
     steps:
       - uses: actions/checkout@v4
 
@@ -81,6 +90,14 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           tools: none
+
+      - name: Expose php-config path
+        run: |
+          PHP_CONFIG_BIN=$(which php-config${{ matrix.php }} 2>/dev/null \
+            || which php-config$(echo "${{ matrix.php }}" | cut -d. -f1) 2>/dev/null \
+            || which php-config 2>/dev/null)
+          echo "Found php-config at: $PHP_CONFIG_BIN"
+          echo "PHP_CONFIG=$PHP_CONFIG_BIN" >> "$GITHUB_ENV"
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -97,8 +114,6 @@ jobs:
 
       - name: Build
         run: cargo build --release
-        env:
-          PHP_CONFIG: php-config
 
       - name: Rename artifact
         run: |
@@ -111,16 +126,19 @@ jobs:
           path: dist/libopusphp-macos-php${{ matrix.php }}.dylib
 
   # ─────────────────────────────────────────────
-  # Windows (.dll)  — best-effort
-  # Note: ext-php-rs Windows support is experimental.
-  # Requires PHP built with the same MSVC toolchain.
+  # Windows (.dll)
+  # ext-php-rs on Windows requires:
+  #   - Rust NIGHTLY (abi_vectorcall is nightly-only)
+  #   - PHP from windows.php.net (setup-php provides this)
+  #   - libopus via vcpkg (pre-installed at C:\vcpkg on windows-latest)
+  #   - rust-lld linker (avoids MSVC linker version mismatches with PHP)
   # ─────────────────────────────────────────────
   build-windows:
     name: Build Windows (.dll)
     runs-on: windows-latest
     strategy:
       matrix:
-        php: ["8.1", "8.2", "8.3"]   # 8.0 PHP Windows SDK no longer maintained
+        php: ["8.1", "8.2", "8.3", "8.4"]
     steps:
       - uses: actions/checkout@v4
 
@@ -130,15 +148,28 @@ jobs:
           php-version: ${{ matrix.php }}
           tools: none
 
-      - name: Install Rust (stable, MSVC)
-        uses: dtolnay/rust-toolchain@stable
+      # windows-latest ships with vcpkg at C:\vcpkg — no need for cargo-vcpkg
+      - name: Install libopus via vcpkg
+        shell: pwsh
+        run: |
+          vcpkg integrate install
+          vcpkg install opus:x64-windows
+
+      # ext-php-rs requires Rust nightly on Windows for the abi_vectorcall feature
+      - name: Install Rust (nightly, MSVC)
+        uses: dtolnay/rust-toolchain@nightly
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Install cargo-vcpkg and build libopus via vcpkg
+      # rust-lld avoids MSVC linker conflicts with PHP's Windows SDK
+      - name: Configure rust-lld linker
+        shell: pwsh
         run: |
-          cargo install cargo-vcpkg
-          cargo vcpkg build
+          $configPath = "$env:USERPROFILE\.cargo\config.toml"
+          $block = "`n[target.x86_64-pc-windows-msvc]`nlinker = `"rust-lld`"`n"
+          if (-not (Test-Path $configPath) -or -not (Select-String "rust-lld" $configPath -Quiet)) {
+            Add-Content -Path $configPath -Value $block
+          }
 
       - name: Cache Cargo registry
         uses: actions/cache@v4
@@ -151,20 +182,23 @@ jobs:
           restore-keys: windows-cargo-php${{ matrix.php }}-
 
       - name: Build
+        shell: pwsh
         run: cargo build --release
         env:
-          PHP_CONFIG: php-config
+          VCPKG_ROOT: C:\vcpkg
+          VCPKGRS_DYNAMIC: "1"
 
       - name: Rename artifact
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/release/opus_php.dll dist/libopusphp-windows-php${{ matrix.php }}.dll
+          # Cargo converts hyphens to underscores in cdylib output names
+          Copy-Item target\release\opus_php.dll dist\libopusphp-windows-php${{ matrix.php }}.dll
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-php${{ matrix.php }}
-          path: dist/libopusphp-windows-php${{ matrix.php }}.dll
+          path: dist\libopusphp-windows-php${{ matrix.php }}.dll
 
   # ─────────────────────────────────────────────
   # Publish GitHub Release
@@ -172,7 +206,6 @@ jobs:
   release:
     name: Create GitHub Release
     needs: [build-linux, build-macos, build-windows]
-    # Run even if Windows build fails (it's experimental)
     if: always() && (needs.build-linux.result == 'success' || needs.build-macos.result == 'success')
     runs-on: ubuntu-latest
     steps:
