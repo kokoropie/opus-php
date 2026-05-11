@@ -36,6 +36,8 @@ jobs:
         with:
           toolchain: ${{ matrix.rust_toolchain }}
           targets: ${{ matrix.os == 'windows-latest' && 'x86_64-pc-windows-msvc' || '' }}
+      - name: Set up MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -57,11 +59,17 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           vcpkg install opus:x64-windows
-          $vcpkg_lib = "${{ env.VCPKG_INSTALLATION_ROOT }}\installed\x64-windows\lib"
-          $vcpkg_include = "${{ env.VCPKG_INSTALLATION_ROOT }}\installed\x64-windows\include"
-          echo "LIB=$vcpkg_lib" >> $env:GITHUB_ENV
-          echo "INCLUDE=$vcpkg_include" >> $env:GITHUB_ENV
-          echo "VCPKG_ROOT=${{ env.VCPKG_INSTALLATION_ROOT }}" >> $env:GITHUB_ENV
+          $vcpkg_base = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
+          echo "LIB=$vcpkg_base\lib" >> $env:GITHUB_ENV
+          echo "INCLUDE=$vcpkg_base\include" >> $env:GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$vcpkg_base\include" >> $env:GITHUB_ENV
+
+      - name: Configure Linker
+        if: runner.os == 'Windows'
+        run: |
+          mkdir .cargo
+          echo '[target.x86_64-pc-windows-msvc]' > .cargo/config.toml
+          echo 'linker = "rust-lld.exe"' >> .cargo/config.toml
 
       - name: Build Extension
         run: cargo build --release
