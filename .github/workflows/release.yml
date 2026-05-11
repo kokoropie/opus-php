@@ -1,109 +1,195 @@
-name: Build and Release
+name: Build Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*.*.*"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+  # ─────────────────────────────────────────────
+  # Linux (.so)
+  # ─────────────────────────────────────────────
+  build-linux:
+    name: Build Linux (.so)
+    runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            artifact_name: libopusphp.so
-            asset_name: opusphp-linux.so
-            rust_toolchain: stable
-          - os: macos-latest
-            artifact_name: libopusphp.dylib
-            asset_name: opusphp-macos.dylib
-            rust_toolchain: stable
-          - os: windows-latest
-            artifact_name: opusphp.dll
-            asset_name: opusphp-windows.dll
-            rust_toolchain: nightly 
-
+        php: ["8.0", "8.1", "8.2", "8.3"]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust_toolchain }}
-          targets: ${{ matrix.os == 'windows-latest' && 'x86_64-pc-windows-msvc' || '' }}
-      - name: Set up MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libopus-dev libclang-dev clang
 
-      - name: Setup PHP
+      - name: Set up PHP ${{ matrix.php }}
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
-          extensions: openssl, mbstring
+          php-version: ${{ matrix.php }}
+          tools: none
 
-      - name: Install Dependencies (Linux)
-        if: runner.os == 'Linux'
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-cargo-php${{ matrix.php }}-${{ hashFiles('Cargo.toml') }}
+          restore-keys: linux-cargo-php${{ matrix.php }}-
+
+      - name: Build
+        run: cargo build --release
+        env:
+          PHP_CONFIG: php-config
+
+      - name: Rename artifact
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libopus-dev clang pkg-config
+          mkdir -p dist
+          cp target/release/libopusphp.so dist/libopusphp-linux-php${{ matrix.php }}.so
 
-      - name: Install Dependencies (macOS)
-        if: runner.os == 'macOS'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-php${{ matrix.php }}
+          path: dist/libopusphp-linux-php${{ matrix.php }}.so
+
+  # ─────────────────────────────────────────────
+  # macOS (.dylib)
+  # ─────────────────────────────────────────────
+  build-macos:
+    name: Build macOS (.dylib)
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        php: ["8.0", "8.1", "8.2", "8.3"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
         run: brew install opus
 
-      - name: Install Dependencies (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          vcpkg install opus:x64-windows
-          $vcpkg_base = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
-          echo "LIB=$vcpkg_base\lib" >> $env:GITHUB_ENV
-          echo "INCLUDE=$vcpkg_base\include" >> $env:GITHUB_ENV
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$vcpkg_base\include" >> $env:GITHUB_ENV
+      - name: Set up PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: none
 
-      - name: Configure Linker
-        if: runner.os == 'Windows'
-        run: |
-          mkdir .cargo
-          echo '[target.x86_64-pc-windows-msvc]' > .cargo/config.toml
-          echo 'linker = "rust-lld.exe"' >> .cargo/config.toml
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Extension
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-cargo-php${{ matrix.php }}-${{ hashFiles('Cargo.toml') }}
+          restore-keys: macos-cargo-php${{ matrix.php }}-
+
+      - name: Build
         run: cargo build --release
+        env:
+          PHP_CONFIG: php-config
 
-      - name: Prepare Artifact
-        shell: bash
+      - name: Rename artifact
         run: |
-          mkdir dist
-          # Windows builds often name the file 'opusphp.dll' instead of 'libopusphp.dll'
-          # We use a wildcard search to find the resulting library regardless of prefix
-          find target/release -maxdepth 1 \( -name "*.so" -o -name "*.dylib" -o -name "*.dll" \) -exec cp {} dist/${{ matrix.asset_name }} \;
+          mkdir -p dist
+          cp target/release/libopusphp.dylib dist/libopusphp-macos-php${{ matrix.php }}.dylib
 
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: dist/${{ matrix.asset_name }}
+          name: macos-php${{ matrix.php }}
+          path: dist/libopusphp-macos-php${{ matrix.php }}.dylib
 
-  release:
-    name: Publish Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  # ─────────────────────────────────────────────
+  # Windows (.dll)  — best-effort
+  # Note: ext-php-rs Windows support is experimental.
+  # Requires PHP built with the same MSVC toolchain.
+  # ─────────────────────────────────────────────
+  build-windows:
+    name: Build Windows (.dll)
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        php: ["8.1", "8.2", "8.3"]   # 8.0 PHP Windows SDK no longer maintained
     steps:
-      - name: Download all compiled artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
         with:
-          path: dist
+          php-version: ${{ matrix.php }}
+          tools: none
+
+      - name: Install Rust (stable, MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install cargo-vcpkg and build libopus via vcpkg
+        run: |
+          cargo install cargo-vcpkg
+          cargo vcpkg build
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-cargo-php${{ matrix.php }}-${{ hashFiles('Cargo.toml') }}
+          restore-keys: windows-cargo-php${{ matrix.php }}-
+
+      - name: Build
+        run: cargo build --release
+        env:
+          PHP_CONFIG: php-config
+
+      - name: Rename artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/opus_php.dll dist/libopusphp-windows-php${{ matrix.php }}.dll
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-php${{ matrix.php }}
+          path: dist/libopusphp-windows-php${{ matrix.php }}.dll
+
+  # ─────────────────────────────────────────────
+  # Publish GitHub Release
+  # ─────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [build-linux, build-macos, build-windows]
+    # Run even if Windows build fails (it's experimental)
+    if: always() && (needs.build-linux.result == 'success' || needs.build-macos.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
           merge-multiple: true
 
-      - name: Create GitHub Release
+      - name: List downloaded files
+        run: ls -R artifacts/
+
+      - name: Create Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
           generate_release_notes: true
+          files: artifacts/**/*
