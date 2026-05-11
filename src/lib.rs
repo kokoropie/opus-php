@@ -1,3 +1,6 @@
+#![cfg_attr(windows, feature(abi_vectorcall))]
+
+use std::convert::TryInto;
 use std::convert::TryFrom;
 
 use anyhow::{bail, Context, Result};

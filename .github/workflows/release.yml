@@ -57,7 +57,11 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           vcpkg install opus:x64-windows
-          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+          $vcpkg_lib = "${{ env.VCPKG_INSTALLATION_ROOT }}\installed\x64-windows\lib"
+          $vcpkg_include = "${{ env.VCPKG_INSTALLATION_ROOT }}\installed\x64-windows\include"
+          echo "LIB=$vcpkg_lib" >> $env:GITHUB_ENV
+          echo "INCLUDE=$vcpkg_include" >> $env:GITHUB_ENV
+          echo "VCPKG_ROOT=${{ env.VCPKG_INSTALLATION_ROOT }}" >> $env:GITHUB_ENV
 
       - name: Build Extension
         run: cargo build --release
