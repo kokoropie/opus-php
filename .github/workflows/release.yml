@@ -63,7 +63,7 @@ jobs:
       - name: Rename artifact
         run: |
           mkdir -p dist
-          cp target/release/libopusphp.so dist/libopusphp-linux-php${{ matrix.php }}.so
+          cp target/release/libopus_php.so dist/libopusphp-linux-php${{ matrix.php }}.so
 
       - uses: actions/upload-artifact@v4
         with:
@@ -118,7 +118,7 @@ jobs:
       - name: Rename artifact
         run: |
           mkdir -p dist
-          cp target/release/libopusphp.dylib dist/libopusphp-macos-php${{ matrix.php }}.dylib
+          cp target/release/libopus_php.dylib dist/libopusphp-macos-php${{ matrix.php }}.dylib
 
       - uses: actions/upload-artifact@v4
         with:
